@@ -1,8 +1,13 @@
 // routes/admin.js
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs'); 
+
+// Middlewares
 const authMiddleware = require('../middleware/authMiddleware');
 const adminMiddleware = require('../middleware/adminMiddleware');
+
+// Models
 const User = require('../models/User');
 const CourseModule = require('../models/CourseModule');
 const Helpdesk = require('../models/Helpdesk');
@@ -10,12 +15,29 @@ const Announcement = require('../models/Announcement');
 const SystemConfig = require('../models/SystemConfig');
 const ConceptualSession = require('../models/ConceptualSession');
 const LandingContent = require('../models/LandingContent');
-const superAdminMiddleware = require('../middleware/superAdminMiddleware');
-const bcrypt = require('bcryptjs'); 
+const Enrollment = require('../models/Enrollment');
+
+// Configs
+const transporter = require('../config/nodemailer'); // Your Brevo config
+
+// ================= CUSTOM SUPER ADMIN SHIELD =================
+// (Must be defined at the top so routes below can use it)
+const verifySuperAdmin = async (req, res, next) => {
+    try {
+        const user = await User.findById(req.user.id);
+        if (user.role !== 'superadmin') {
+            return res.status(403).json({ message: 'ACCESS DENIED: Commander clearance required.' });
+        }
+        next();
+    } catch (err) {
+        res.status(500).send('Server Error');
+    }
+};
+// ==============================================================
+
 // ROUTE 1: Get all students and their assignments
 router.get('/dashboard-data', [authMiddleware, adminMiddleware], async (req, res) => {
     try {
-        // Find all users who are 'student' role, returning only necessary fields
         const students = await User.find({ role: 'student' }).select('-password -otp -otpExpires');
         res.json(students);
     } catch (err) {
@@ -32,48 +54,36 @@ router.post('/grade-assignment', [authMiddleware, adminMiddleware], async (req, 
         const student = await User.findById(studentId);
         if (!student) return res.status(404).json({ message: "Student not found" });
 
-        // Find the specific assignment in the student's array
         const assignmentIndex = student.assignments.findIndex(a => a.assignmentId === assignmentId);
         if (assignmentIndex === -1) return res.status(404).json({ message: "Assignment not found" });
 
-        // Update the marks and status
         student.assignments[assignmentIndex].marksObtained = marks;
-        student.assignments[assignmentIndex].status = status; // 'graded' or 'resubmit_requested'
+        student.assignments[assignmentIndex].status = status; 
 
-        // If resubmit requested, deduct 5 gems (Programming Hero style penalty)
         if (status === 'resubmit_requested') {
             student.gems = Math.max(0, student.gems - 5);
         }
 
         await student.save();
-
         res.status(200).json({ message: "Grade submitted successfully!" });
-
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
     }
 });
 
-
-
-// ROUTE 3: Add Content Dynamically (No Code Needed!)
+// ROUTE 3: Add Content Dynamically
 router.post('/add-content', [authMiddleware, adminMiddleware], async (req, res) => {
     try {
-        // You will send this data from a form in your Admin Dashboard
         const { moduleId, title, description, newVideos, newQuizzes, isAssignmentModule } = req.body;
-
-        // Find the module, or create it if it doesn't exist
         let courseModule = await CourseModule.findOne({ moduleId });
 
         if (courseModule) {
-            // Module exists? Just push the new daily videos/quizzes into it!
             if (newVideos && newVideos.length > 0) courseModule.videos.push(...newVideos);
             if (newQuizzes && newQuizzes.length > 0) courseModule.quizzes.push(...newQuizzes);
             await courseModule.save();
             return res.json({ message: `Successfully added content to Module ${moduleId}` });
         } else {
-            // It's a brand new week/module? Create it!
             courseModule = new CourseModule({ 
                 moduleId, 
                 title, 
@@ -94,13 +104,11 @@ router.post('/add-content', [authMiddleware, adminMiddleware], async (req, res) 
 // ROUTE 4: Generate Paid Student Account
 router.post('/register-student', [authMiddleware, adminMiddleware], async (req, res) => {
     try {
-        // When someone pays you via bKash, you type their details into your Admin UI
         const { name, email, phone, tempPassword } = req.body;
 
         let user = await User.findOne({ email });
         if (user) return res.status(400).json({ message: "Student already exists in the system." });
 
-        // Encrypt their temporary password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(tempPassword, salt);
 
@@ -116,31 +124,25 @@ router.post('/register-student', [authMiddleware, adminMiddleware], async (req, 
 
         await user.save();
         res.status(200).json({ message: `Access granted. Paid account created for ${name}.` });
-
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
     }
 });
 
-
-// ROUTE 5: Get All Students (For Admin Roster)
-// Get Paginated Students
+// ROUTE 5: Get Paginated Students
 router.get('/students', [authMiddleware, verifySuperAdmin], async (req, res) => {
     try {
-        // Grab page and limit from the URL, default to page 1, 20 students per page
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
 
-        // Fetch only the requested slice of students
         const students = await User.find({ role: 'student' })
             .select('-password -otp')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
         
-        // Count total students so the frontend knows how many pages exist
         const total = await User.countDocuments({ role: 'student' });
 
         res.json({
@@ -212,7 +214,7 @@ router.get('/student/:id', [authMiddleware, adminMiddleware], async (req, res) =
 // ROUTE: Modify Student Gems
 router.post('/student/:id/gems', [authMiddleware, adminMiddleware], async (req, res) => {
     try {
-        const { amount, action } = req.body; // action: 'add' or 'subtract'
+        const { amount, action } = req.body; 
         const student = await User.findById(req.params.id);
         
         if (action === 'add') student.gems += parseInt(amount);
@@ -231,7 +233,6 @@ router.post('/student/:id/grade', [authMiddleware, adminMiddleware], async (req,
         const { assignmentId, marksObtained, feedback } = req.body;
         const student = await User.findById(req.params.id);
         
-        // Find existing assignment or create it
         let assignment = student.assignments.find(a => a.assignmentId === parseInt(assignmentId));
         if (!assignment) {
             student.assignments.push({ assignmentId, status: 'Graded', marksObtained, feedback });
@@ -241,7 +242,6 @@ router.post('/student/:id/grade', [authMiddleware, adminMiddleware], async (req,
             assignment.feedback = feedback;
         }
 
-        // Award gems based on marks (e.g., 10 gems for a perfect SOP)
         if (marksObtained >= 80) student.gems += 10;
         else if (marksObtained >= 50) student.gems += 5;
 
@@ -311,7 +311,6 @@ router.delete('/announcements/:id', [authMiddleware, adminMiddleware], async (re
     } catch (err) { res.status(500).send('Server Error'); }
 });
 
-
 // ROUTE: Get or Update System Config (Batches)
 router.post('/config', [authMiddleware, adminMiddleware], async (req, res) => {
     try {
@@ -336,12 +335,10 @@ router.post('/conceptual-session', [authMiddleware, adminMiddleware], async (req
     } catch (err) { res.status(500).send('Server Error'); }
 });
 
-
 // ROUTE: Admin Force Password Reset
 router.post('/student/:id/reset-password', [authMiddleware, adminMiddleware], async (req, res) => {
     try {
         const { newPassword } = req.body;
-        
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(newPassword, salt);
         
@@ -352,18 +349,15 @@ router.post('/student/:id/reset-password', [authMiddleware, adminMiddleware], as
     }
 });
 
-
 // ROUTE: Staff Updates Website Content (LIMITLESS ENGINE)
 router.post('/landing-content', [authMiddleware, adminMiddleware], async (req, res) => {
     try {
         let content = await LandingContent.findOne();
         
         if (!content) {
-            // First time setup
             content = new LandingContent({ ...req.body, updatedAt: Date.now() });
             await content.save();
         } else {
-            // Forcefully overwrite the entire document with whatever the frontend sends
             await LandingContent.updateOne(
                 { _id: content._id }, 
                 { $set: { ...req.body, updatedAt: Date.now() } }
@@ -374,66 +368,6 @@ router.post('/landing-content', [authMiddleware, adminMiddleware], async (req, r
         res.status(500).send('Server Error'); 
     }
 });
-
-// ================= STAFF MANAGEMENT (SUPER ADMIN ONLY) =================
-
-// ROUTE: Get all staff members
-router.get('/staff', [authMiddleware, superAdminMiddleware], async (req, res) => {
-    try {
-        const staff = await User.find({ role: { $in: ['admin', 'superadmin'] } }).select('-password -otp');
-        res.json(staff);
-    } catch (err) { res.status(500).send('Server Error'); }
-});
-
-// ROUTE: Create a new Admin
-router.post('/add-staff', [authMiddleware, superAdminMiddleware], async (req, res) => {
-    try {
-        const { name, email, password, role } = req.body; // role should be 'admin'
-
-        let user = await User.findOne({ email });
-        if (user) return res.status(400).json({ message: "Email already in use." });
-
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-
-        user = new User({
-            name,
-            email,
-            password: hashedPassword,
-            role: role || 'admin'
-        });
-
-        await user.save();
-        res.json({ message: 'New staff member deployed successfully.' });
-    } catch (err) { res.status(500).send('Server Error'); }
-});
-
-// ROUTE: Remove an Admin
-router.delete('/remove-staff/:id', [authMiddleware, superAdminMiddleware], async (req, res) => {
-    try {
-        const targetUser = await User.findById(req.params.id);
-        
-        // Prevent deleting other superadmins or yourself
-        if (targetUser.role === 'superadmin') {
-            return res.status(403).json({ message: "Cannot delete a Super Admin." });
-        }
-
-        await User.findByIdAndDelete(req.params.id);
-        res.json({ message: 'Staff member access revoked.' });
-    } catch (err) { res.status(500).send('Server Error'); }
-});
-
-const verifySuperAdmin = async (req, res, next) => {
-    try {
-        const user = await User.findById(req.user.id);
-        if (user.role !== 'superadmin') {
-            return res.status(403).json({ message: 'ACCESS DENIED: Commander clearance required.' });
-        }
-        next();
-    } catch (err) {
-        res.status(500).send('Server Error');
-    }
-};
 
 // ================= STAFF MANAGEMENT ROUTES =================
 
@@ -460,7 +394,7 @@ router.post('/add-staff', [authMiddleware, verifySuperAdmin], async (req, res) =
             name,
             email,
             password: hashedPassword,
-            role: 'admin' // Forces the role to be standard admin
+            role: 'admin' 
         });
 
         await user.save();
@@ -483,27 +417,18 @@ router.delete('/remove-staff/:id', [authMiddleware, verifySuperAdmin], async (re
     } catch (err) { res.status(500).send('Server Error'); }
 });
 
-// const express = require('express');
-// const router = express.Router();
-const User = require('../models/User');
-const Enrollment = require('../models/Enrollment');
-const transporter = require('../config/nodemailer'); // Your Brevo config
-
-// SECRET BACKUP ROUTE
+// ================= SECRET BACKUP ROUTE =================
 router.get('/secret-db-backup', async (req, res) => {
-    // 1. Add a secret password so hackers can't trigger this
     if (req.query.key !== process.env.BACKUP_SECRET_KEY) {
         return res.status(401).send('Unauthorized');
     }
 
     try {
-        // 2. Fetch all critical data
         const users = await User.find().select('-password');
         const enrollments = await Enrollment.find();
         
         const backupData = JSON.stringify({ users, enrollments }, null, 2);
 
-        // 3. Email it to yourself via Brevo
         await transporter.sendMail({
             from: `"SAWN BD Server" <${process.env.EMAIL_USER}>`,
             to: "support.sawnbd@protonmail.com",
@@ -522,4 +447,5 @@ router.get('/secret-db-backup', async (req, res) => {
         res.status(500).send('Backup failed');
     }
 });
+
 module.exports = router;
