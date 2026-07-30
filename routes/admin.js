@@ -482,4 +482,44 @@ router.delete('/remove-staff/:id', [authMiddleware, verifySuperAdmin], async (re
         res.json({ message: 'Admin access permanently revoked.' });
     } catch (err) { res.status(500).send('Server Error'); }
 });
+
+const express = require('express');
+const router = express.Router();
+const User = require('../models/User');
+const Enrollment = require('../models/Enrollment');
+const transporter = require('../config/nodemailer'); // Your Brevo config
+
+// SECRET BACKUP ROUTE
+router.get('/secret-db-backup', async (req, res) => {
+    // 1. Add a secret password so hackers can't trigger this
+    if (req.query.key !== process.env.BACKUP_SECRET_KEY) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        // 2. Fetch all critical data
+        const users = await User.find().select('-password');
+        const enrollments = await Enrollment.find();
+        
+        const backupData = JSON.stringify({ users, enrollments }, null, 2);
+
+        // 3. Email it to yourself via Brevo
+        await transporter.sendMail({
+            from: `"SAWN BD Server" <${process.env.EMAIL_USER}>`,
+            to: "support.sawnbd@protonmail.com",
+            subject: `Database Backup - ${new Date().toISOString()}`,
+            text: "Attached is the latest database backup.",
+            attachments: [
+                {
+                    filename: `sawn-bd-backup-${Date.now()}.json`,
+                    content: backupData
+                }
+            ]
+        });
+
+        res.send('Backup emailed successfully!');
+    } catch (err) {
+        res.status(500).send('Backup failed');
+    }
+});
 module.exports = router;
