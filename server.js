@@ -17,8 +17,14 @@ app.use(helmet({
 
 // 2. CORS (Cross-Origin Resource Sharing) - RE-CONFIGURED RIGHT
 // ফ্রন্টএন্ড পোর্ট ৩০০০ কে ব্যাকএন্ড পোর্ট ৫০০০ এর সাথে ফুল এক্সেস দেওয়া হলো
+// 2. CORS (Cross-Origin Resource Sharing)
 const corsOptions = {
-  origin: ['http://localhost:3000', 'https://sawnbd.com', 'https://www.sawnbd.com'], 
+  origin: [
+    'http://localhost:3000', 
+    'https://sawnbd.com', 
+    'https://www.sawnbd.com',
+    'https://sawnbd.vercel.app' // ⚠️ ADDED THIS LINE
+  ], 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
