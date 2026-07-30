@@ -5,13 +5,27 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const nodemailer = require('nodemailer');
 
-// 🚀 GMAIL TRANSPORTER SETUP
+// 🚀 EXPLICIT GMAIL SMTP TRANSPORTER
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // true for 465, false for other ports
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  connectionTimeout: 10000, // Forces it to fail in 10 seconds if blocked, not 2 minutes
+  greetingTimeout: 10000,
+  socketTimeout: 10000
+});
+
+// Verify the connection immediately when the server boots
+transporter.verify((error, success) => {
+  if (error) {
+    console.log("🔴 Gmail SMTP Connection Error:", error.message);
+  } else {
+    console.log("🟢 Gmail SMTP is Ready to transmit");
+  }
 });
 
 // 1. LOGIN & SEND OTP ROUTE
