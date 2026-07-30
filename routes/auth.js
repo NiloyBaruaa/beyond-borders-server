@@ -5,18 +5,20 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const nodemailer = require('nodemailer');
 
-// 🚀 EXPLICIT GMAIL SMTP TRANSPORTER
+// 🚀 GMAIL SMTP PORT 587 BYPASS
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // true for 465, false for other ports
+  port: 587,
+  secure: false, // Must be false for 587. It will automatically upgrade with STARTTLS.
+  requireTLS: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
-  connectionTimeout: 10000, // Forces it to fail in 10 seconds if blocked, not 2 minutes
-  greetingTimeout: 10000,
-  socketTimeout: 10000
+  tls: {
+    // This prevents Render's proxy network from rejecting the SSL certificate
+    rejectUnauthorized: false
+  }
 });
 
 // Verify the connection immediately when the server boots
