@@ -6,13 +6,26 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
-const CourseModule = require('../models/CourseModule');
-const Helpdesk = require('../models/Helpdesk');
-const Announcement = require('../models/Announcement');
-const SystemConfig = require('../models/SystemConfig');
-const ConceptualSession = require('../models/ConceptualSession');
-const LandingContent = require('../models/LandingContent');
+const CourseModule = require("../models/CourseModule");
+const Helpdesk = require("../models/Helpdesk");
+const Announcement = require("../models/Announcement");
+const SystemConfig = require("../models/SystemConfig");
+const ConceptualSession = require("../models/ConceptualSession");
+const LandingContent = require("../models/LandingContent");
 
+const rateLimit = require("express-rate-limit");
+
+// 🛡️ The OTP Spam Shield
+const otpLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 3, // Limit each IP to 3 OTP requests per window
+  message: {
+    message:
+      "Too many login attempts. Please wait 5 minutes before trying again.",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 // ROUTE 1: Login & Trigger OTP
 router.post("/login", async (req, res) => {
   try {
@@ -22,7 +35,8 @@ router.post("/login", async (req, res) => {
     if (!user) return res.status(400).json({ message: "Invalid Credentials" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid Credentials" });
+    if (!isMatch)
+      return res.status(400).json({ message: "Invalid Credentials" });
 
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -30,14 +44,20 @@ router.post("/login", async (req, res) => {
     user.otpExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-
+  const transporter = nodemailer.createTransport({
+            host: "smtp-relay.brevo.com",
+            port: 587,
+            secure: false, // Must be false for port 587
+            auth: { 
+                user: process.env.EMAIL_USER, // Your Brevo account email
+                pass: process.env.EMAIL_PASS  // Your Brevo SMTP Key
+            },
+        });
+        
+        const mailOptions = {
+            from: `"SAWN BD Support" <${process.env.EMAIL_USER}>`,
+            // ... rest of your email config
+        };
     const mailOptions = {
       from: `"SAWN BD" <${process.env.EMAIL_USER}>`,
       to: user.email,
@@ -66,13 +86,15 @@ router.post("/login", async (req, res) => {
 });
 
 // ROUTE: Admin creates a new student (Register)
-router.post('/register', async (req, res) => {
+router.post("/register", async (req, res) => {
   try {
     const { name, email, phone, tempPassword, batchNumber } = req.body;
 
     let user = await User.findOne({ email });
     if (user) {
-      return res.status(400).json({ message: "Student with this email already exists." });
+      return res
+        .status(400)
+        .json({ message: "Student with this email already exists." });
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -83,12 +105,11 @@ router.post('/register', async (req, res) => {
       email,
       phone,
       password: hashedPassword,
-      batchNumber: batchNumber || 1 
+      batchNumber: batchNumber || 1,
     });
 
     await user.save();
     res.status(200).json({ message: "Student account created successfully." });
-
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Server Error");
@@ -103,8 +124,10 @@ router.post("/verify-otp", async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: "User not found" });
 
-    if (user.otp !== otp) return res.status(400).json({ message: "Invalid OTP Code" });
-    if (user.otpExpires < Date.now()) return res.status(400).json({ message: "OTP has expired." });
+    if (user.otp !== otp)
+      return res.status(400).json({ message: "Invalid OTP Code" });
+    if (user.otpExpires < Date.now())
+      return res.status(400).json({ message: "OTP has expired." });
 
     // const currentDeviceId = req.body.deviceId;
 
@@ -135,17 +158,17 @@ router.post("/verify-otp", async (req, res) => {
         await user.save();
 
         // THIS IS THE FIX: Sending the token AND the role back to the frontend
-        res.status(200).json({ 
-            message: "Welcome to the Bootcamp",
-            token: token,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role 
-            }
+        res.status(200).json({
+          message: "Welcome to the Bootcamp",
+          token: token,
+          user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          },
         });
-      }
+      },
     );
   } catch (err) {
     console.error(err.message);
@@ -156,7 +179,9 @@ router.post("/verify-otp", async (req, res) => {
 // ROUTE 3: Get Student Profile (Protected Route)
 router.get("/me", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password -otp -otpExpires");
+    const user = await User.findById(req.user.id).select(
+      "-password -otp -otpExpires",
+    );
     res.json(user);
   } catch (err) {
     console.error(err.message);
@@ -168,7 +193,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 router.get("/leaderboard", authMiddleware, async (req, res) => {
   try {
     const topStudents = await User.find({ role: "student" })
-      .select("name gems") 
+      .select("name gems")
       .sort({ gems: -1 })
       .limit(10);
     res.json(topStudents);
@@ -178,200 +203,234 @@ router.get("/leaderboard", authMiddleware, async (req, res) => {
   }
 });
 
-// ROUTE 5: Grade Quiz & Award Gems 
-router.post('/submit-quiz', authMiddleware, async (req, res) => {
-    try {
-        const { moduleId, answers } = req.body; 
+// ROUTE 5: Grade Quiz & Award Gems
+router.post("/submit-quiz", authMiddleware, async (req, res) => {
+  try {
+    const { moduleId, answers } = req.body;
 
-        const courseModule = await CourseModule.findOne({ moduleId });
-        if (!courseModule) return res.status(404).json({ msg: 'Module not found' });
+    const courseModule = await CourseModule.findOne({ moduleId });
+    if (!courseModule) return res.status(404).json({ msg: "Module not found" });
 
-        let score = 0;
-        let gemsEarned = 0;
+    let score = 0;
+    let gemsEarned = 0;
 
-        courseModule.quizzes.forEach(quiz => {
-            const studentAnswer = answers.find(a => a.questionId === quiz.questionId);
-            if (studentAnswer && parseInt(studentAnswer.selectedOptionIndex) === parseInt(quiz.correctAnswerIndex)) {
-                score += 1;
-            }
-        });
+    courseModule.quizzes.forEach((quiz) => {
+      const studentAnswer = answers.find(
+        (a) => a.questionId === quiz.questionId,
+      );
+      if (
+        studentAnswer &&
+        parseInt(studentAnswer.selectedOptionIndex) ===
+          parseInt(quiz.correctAnswerIndex)
+      ) {
+        score += 1;
+      }
+    });
 
-        const totalQuestions = courseModule.quizzes.length;
-        if (score === totalQuestions && totalQuestions > 0) {
-            gemsEarned = 2; 
-        } else if (score >= 5) {
-            gemsEarned = 1; 
-        } else {
-            gemsEarned = 0; 
-        }
-
-        const user = await User.findById(req.user.id);
-        const existingScore = user.quizScores.find(q => q.moduleId === parseInt(moduleId));
-        if (existingScore) return res.status(400).json({ msg: 'Quiz already completed for this module.' });
-
-        user.quizScores.push({ moduleId, score, total: totalQuestions });
-        user.gems += gemsEarned;
-        
-        if (!user.completedModules.includes(parseInt(moduleId))) {
-            user.completedModules.push(parseInt(moduleId));
-        }
-
-        await user.save();
-        res.json({ score, total: totalQuestions, gemsEarned });
-
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+    const totalQuestions = courseModule.quizzes.length;
+    if (score === totalQuestions && totalQuestions > 0) {
+      gemsEarned = 2;
+    } else if (score >= 5) {
+      gemsEarned = 1;
+    } else {
+      gemsEarned = 0;
     }
+
+    const user = await User.findById(req.user.id);
+    const existingScore = user.quizScores.find(
+      (q) => q.moduleId === parseInt(moduleId),
+    );
+    if (existingScore)
+      return res
+        .status(400)
+        .json({ msg: "Quiz already completed for this module." });
+
+    user.quizScores.push({ moduleId, score, total: totalQuestions });
+    user.gems += gemsEarned;
+
+    if (!user.completedModules.includes(parseInt(moduleId))) {
+      user.completedModules.push(parseInt(moduleId));
+    }
+
+    await user.save();
+    res.json({ score, total: totalQuestions, gemsEarned });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
 });
 
-// ROUTE 6: Get Smart Modules & Conceptual Sessions 
-router.get('/modules', authMiddleware, async (req, res) => {
-    try {
-        const user = await User.findById(req.user.id);
-        
-        let config = await SystemConfig.findOne();
-        if (!config) {
-            config = new SystemConfig({ activeBatch: 1, latestCompletedBatch: 1 });
-            await config.save();
-        }
+// ROUTE 6: Get Smart Modules & Conceptual Sessions
+router.get("/modules", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
 
-        let targetBatch;
-
-        if (user.batchNumber === config.activeBatch) {
-            targetBatch = config.activeBatch;
-        } else if (user.batchNumber < config.activeBatch) {
-            targetBatch = config.latestCompletedBatch;
-        } else {
-            targetBatch = user.batchNumber;
-        }
-
-        const modules = await CourseModule.find({ batchNumber: targetBatch }).sort({ moduleId: 1 });
-        const sessions = await ConceptualSession.find({ batchNumber: targetBatch }).sort({ createdAt: -1 });
-
-        res.json({ modules, sessions, config });
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+    let config = await SystemConfig.findOne();
+    if (!config) {
+      config = new SystemConfig({ activeBatch: 1, latestCompletedBatch: 1 });
+      await config.save();
     }
+
+    let targetBatch;
+
+    if (user.batchNumber === config.activeBatch) {
+      targetBatch = config.activeBatch;
+    } else if (user.batchNumber < config.activeBatch) {
+      targetBatch = config.latestCompletedBatch;
+    } else {
+      targetBatch = user.batchNumber;
+    }
+
+    const modules = await CourseModule.find({ batchNumber: targetBatch }).sort({
+      moduleId: 1,
+    });
+    const sessions = await ConceptualSession.find({
+      batchNumber: targetBatch,
+    }).sort({ createdAt: -1 });
+
+    res.json({ modules, sessions, config });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
 });
 
 // ROUTE 7: Toggle Bookmark
-router.post('/toggle-bookmark', authMiddleware, async (req, res) => {
-    try {
-        const { videoId } = req.body;
-        const user = await User.findById(req.user.id);
-        
-        const isBookmarked = user.bookmarkedVideos.includes(videoId);
-        
-        if (isBookmarked) {
-            user.bookmarkedVideos = user.bookmarkedVideos.filter(id => id !== videoId);
-        } else {
-            user.bookmarkedVideos.push(videoId);
-        }
-        
-        await user.save();
-        res.json({ isBookmarked: !isBookmarked, bookmarkedVideos: user.bookmarkedVideos });
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+router.post("/toggle-bookmark", authMiddleware, async (req, res) => {
+  try {
+    const { videoId } = req.body;
+    const user = await User.findById(req.user.id);
+
+    const isBookmarked = user.bookmarkedVideos.includes(videoId);
+
+    if (isBookmarked) {
+      user.bookmarkedVideos = user.bookmarkedVideos.filter(
+        (id) => id !== videoId,
+      );
+    } else {
+      user.bookmarkedVideos.push(videoId);
     }
+
+    await user.save();
+    res.json({
+      isBookmarked: !isBookmarked,
+      bookmarkedVideos: user.bookmarkedVideos,
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
 });
 
 // ROUTE: Update Student Profile
-router.put('/profile', authMiddleware, async (req, res) => {
-    try {
-        const user = await User.findById(req.user.id);
-        user.personalDetails = { ...user.personalDetails, ...req.body };
-        await user.save();
-        res.json({ message: 'Profile updated securely.' });
-    } catch (err) {
-        res.status(500).send('Server Error');
-    }
+router.put("/profile", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    user.personalDetails = { ...user.personalDetails, ...req.body };
+    await user.save();
+    res.json({ message: "Profile updated securely." });
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
 });
 
 // ROUTE: Get All Community Helpdesk Tickets
-router.get('/helpdesk', authMiddleware, async (req, res) => {
-    try {
-        const tickets = await Helpdesk.find().sort({ createdAt: -1 }); 
-        res.json(tickets);
-    } catch (err) {
-        res.status(500).send('Server Error');
-    }
+router.get("/helpdesk", authMiddleware, async (req, res) => {
+  try {
+    const tickets = await Helpdesk.find().sort({ createdAt: -1 });
+    res.json(tickets);
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
 });
 
 // ROUTE: Create a New Ticket
-router.post('/helpdesk', authMiddleware, async (req, res) => {
-    try {
-        const user = await User.findById(req.user.id);
-        const { category, subject, details } = req.body;
-        
-        const newTicket = new Helpdesk({
-            studentName: user.name,
-            studentId: user.id,
-            category,
-            subject,
-            details
-        });
-        await newTicket.save();
-        res.json({ message: 'Question posted to the community.' });
-    } catch (err) {
-        res.status(500).send('Server Error');
-    }
+router.post("/helpdesk", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    const { category, subject, details } = req.body;
+
+    const newTicket = new Helpdesk({
+      studentName: user.name,
+      studentId: user.id,
+      category,
+      subject,
+      details,
+    });
+    await newTicket.save();
+    res.json({ message: "Question posted to the community." });
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
 });
 
 // ROUTE: Get Announcements & Check Notification Status
-router.get('/announcements', authMiddleware, async (req, res) => {
-    try {
-        const posts = await Announcement.find().sort({ createdAt: -1 });
-        const user = await User.findById(req.user.id);
-        
-        const latestPost = posts.length > 0 ? posts[0].createdAt : null;
-        const hasUnread = latestPost && (!user.lastViewedAnnouncements || latestPost > user.lastViewedAnnouncements);
+router.get("/announcements", authMiddleware, async (req, res) => {
+  try {
+    const posts = await Announcement.find().sort({ createdAt: -1 });
+    const user = await User.findById(req.user.id);
 
-        res.json({ posts, hasUnread });
-    } catch (err) { res.status(500).send('Server Error'); }
+    const latestPost = posts.length > 0 ? posts[0].createdAt : null;
+    const hasUnread =
+      latestPost &&
+      (!user.lastViewedAnnouncements ||
+        latestPost > user.lastViewedAnnouncements);
+
+    res.json({ posts, hasUnread });
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
 });
 
 // ROUTE: Mark Announcements as Read
-router.post('/announcements/read', authMiddleware, async (req, res) => {
-    try {
-        const user = await User.findById(req.user.id);
-        user.lastViewedAnnouncements = Date.now();
-        await user.save();
-        res.json({ message: 'Radar cleared.' });
-    } catch (err) { res.status(500).send('Server Error'); }
+router.post("/announcements/read", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    user.lastViewedAnnouncements = Date.now();
+    await user.save();
+    res.json({ message: "Radar cleared." });
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
 });
 
 // ROUTE: Student Change Password
-router.put('/change-password', authMiddleware, async (req, res) => {
-    try {
-        const { currentPassword, newPassword } = req.body;
-        const user = await User.findById(req.user.id);
-        
-        const isMatch = await bcrypt.compare(currentPassword, user.password);
-        if (!isMatch) return res.status(400).json({ message: 'Incorrect current password.' });
-        
-        const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(newPassword, salt);
-        
-        await user.save();
-        res.json({ message: 'Password updated securely.' });
-    } catch (err) {
-        res.status(500).send('Server Error');
-    }
+router.put("/change-password", authMiddleware, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const user = await User.findById(req.user.id);
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch)
+      return res.status(400).json({ message: "Incorrect current password." });
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+
+    await user.save();
+    res.json({ message: "Password updated securely." });
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
 });
 
 // ROUTE: Public Website Fetch (NO AUTH REQUIRED)
-router.get('/landing-content', async (req, res) => {
-    try {
-        let content = await LandingContent.findOne();
-        if (!content) {
-            content = new LandingContent(); 
-            await content.save();
-        }
-        res.json(content);
-    } catch (err) { res.status(500).send('Server Error'); }
+router.get("/landing-content", async (req, res) => {
+  try {
+    let content = await LandingContent.findOne();
+    if (!content) {
+      content = new LandingContent();
+      await content.save();
+    }
+    res.json(content);
+  } catch (err) {
+    res.status(500).send("Server Error");
+  }
+});
+
+// Add 'otpLimiter' as the second parameter
+router.post("/login", otpLimiter, async (req, res) => {
+  // ... your existing login code ...
 });
 
 module.exports = router;

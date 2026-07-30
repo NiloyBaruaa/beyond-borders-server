@@ -125,12 +125,32 @@ router.post('/register-student', [authMiddleware, adminMiddleware], async (req, 
 
 
 // ROUTE 5: Get All Students (For Admin Roster)
-router.get('/students', [authMiddleware, adminMiddleware], async (req, res) => {
+// Get Paginated Students
+router.get('/students', [authMiddleware, verifySuperAdmin], async (req, res) => {
     try {
-        const students = await User.find({ role: 'student' }).select('-password');
-        res.json(students);
-    } catch (err) {
-        res.status(500).send('Server Error');
+        // Grab page and limit from the URL, default to page 1, 20 students per page
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
+
+        // Fetch only the requested slice of students
+        const students = await User.find({ role: 'student' })
+            .select('-password -otp')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+        
+        // Count total students so the frontend knows how many pages exist
+        const total = await User.countDocuments({ role: 'student' });
+
+        res.json({
+            students,
+            currentPage: page,
+            totalPages: Math.ceil(total / limit),
+            totalStudents: total
+        });
+    } catch (err) { 
+        res.status(500).send('Server Error'); 
     }
 });
 

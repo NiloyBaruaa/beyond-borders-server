@@ -63,7 +63,13 @@ app.use((req, res, next) => {
 });
 
 // Database Connection
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI, {
+    maxPoolSize: 100, // Opens 100 parallel lanes for data traffic
+    serverSelectionTimeoutMS: 5000, // Fails fast instead of hanging forever
+    socketTimeoutMS: 45000, // Closes dead connections to save memory
+})
+.then(() => console.log('🟢 MongoDB Connected via High-Speed Pool'))
+.catch(err => console.log('🔴 MongoDB Error:', err));
   .then(() => console.log('✅ MongoDB Engine Connected'))
   .catch((err) => console.log('❌ Database connection failed:', err));
 
