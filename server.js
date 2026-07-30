@@ -16,9 +16,9 @@ app.use(helmet({
 }));
 
 // 2. CORS (Cross-Origin Resource Sharing) - RE-CONFIGURED RIGHT
-// ফ্রন্টএন্ড পোর্ট ৩০০০ কে ব্যাকএন্ড পোর্ট ৫০০০ এর সাথে ফুল এক্সেস দেওয়া হলো
+// ফ্রন্টএন্ড পোর্ট ৩০০০ কে ব্যাকএন্ড পোর্ট ৫০০০ এর সাথে ফুল এক্সেস দেওয়া হলো
 const corsOptions = {
-  origin: ['http://localhost:3000', 'https://your-live-website.com'], 
+  origin: ['http://localhost:3000', 'https://sawnbd.com', 'https://www.sawnbd.com'], 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -28,7 +28,7 @@ app.use(cors(corsOptions));
 // 3. Rate Limiting 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
-  max: 500, // লিমিট বাড়িয়ে ৫০০ করা হলো যাতে ড্যাশবোর্ড লোডিং ব্লক না হয়
+  max: 500, // লিমিট বাড়িয়ে ৫০০ করা হলো যাতে ড্যাশবোর্ড লোডিং ব্লক না হয়
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/', limiter);
@@ -70,8 +70,6 @@ mongoose.connect(process.env.MONGO_URI, {
 })
 .then(() => console.log('🟢 MongoDB Connected via High-Speed Pool'))
 .catch(err => console.log('🔴 MongoDB Error:', err));
-  .then(() => console.log('✅ MongoDB Engine Connected'))
-  .catch((err) => console.log('❌ Database connection failed:', err));
 
 // ================= AUTO-DEPLOY COMMANDER ACCOUNT =================
 const createCommanderAccount = async () => {
