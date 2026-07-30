@@ -483,8 +483,8 @@ router.delete('/remove-staff/:id', [authMiddleware, verifySuperAdmin], async (re
     } catch (err) { res.status(500).send('Server Error'); }
 });
 
-const express = require('express');
-const router = express.Router();
+// const express = require('express');
+// const router = express.Router();
 const User = require('../models/User');
 const Enrollment = require('../models/Enrollment');
 const transporter = require('../config/nodemailer'); // Your Brevo config
