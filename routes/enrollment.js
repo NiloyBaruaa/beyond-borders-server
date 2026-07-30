@@ -96,39 +96,34 @@ router.post("/approve/:id", [authMiddleware, verifyAdmin], async (req, res) => {
     await request.save();
 
     // SEND THE WELCOME EMAIL
- const transporter = nodemailer.createTransport({
-            host: "smtp-relay.brevo.com",
-            port: 587,
-            secure: false, // Must be false for port 587
-            auth: { 
-                user: process.env.EMAIL_USER, // Your Brevo account email
-                pass: process.env.EMAIL_PASS  // Your Brevo SMTP Key
-            },
-        });
-        
-        const mailOptions = {
-            from: `"SAWN BD Support" <${process.env.EMAIL_USER}>`,
-            // ... rest of your email config
-        };
+    const transporter = nodemailer.createTransport({
+      host: "smtp-relay.brevo.com",
+      port: 587,
+      secure: false, // Must be false for port 587
+      auth: { 
+        user: process.env.EMAIL_USER, // Your Brevo account email
+        pass: process.env.EMAIL_PASS  // Your Brevo SMTP Key
+      },
+    });
 
     const mailOptions = {
       from: `"SAWN BD" <${process.env.EMAIL_USER}>`,
       to: newStudent.email,
       subject: "Welcome to SAWN BD Bootcamp! 🚀",
       html: `
-                <div style="font-family: Arial; max-width: 500px; margin: auto; background: #0a0a0a; color: #fff; padding: 30px; border-radius: 10px;">
-                    <h2 style="color: #8B5CF6;">Payment Verified! 🎉</h2>
-                    <p>Hello ${newStudent.name},</p>
-                    <p>Your payment has been successfully verified by the Commander. Welcome to the SAWN BD Europe Study Abroad Bootcamp!</p>
-                    <div style="background: #111; padding: 20px; border-left: 4px solid #00f0ff; margin: 20px 0;">
-                        <p><strong>Your Flight Deck Login:</strong></p>
-                        <p>Email: ${newStudent.email}</p>
-                        <p>Password: <span style="color: #00f0ff; font-weight: bold; letter-spacing: 2px;">${tempPassword}</span></p>
-                    </div>
-                    <p>Please log in and change your password immediately from your profile settings.</p>
-                    <a href="https://your-website-url.com/login" style="background: #8B5CF6; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Login to Dashboard</a>
-                </div>
-            `,
+        <div style="font-family: Arial; max-width: 500px; margin: auto; background: #0a0a0a; color: #fff; padding: 30px; border-radius: 10px;">
+            <h2 style="color: #8B5CF6;">Payment Verified! 🎉</h2>
+            <p>Hello ${newStudent.name},</p>
+            <p>Your payment has been successfully verified by the Commander. Welcome to the SAWN BD Europe Study Abroad Bootcamp!</p>
+            <div style="background: #111; padding: 20px; border-left: 4px solid #00f0ff; margin: 20px 0;">
+                <p><strong>Your Flight Deck Login:</strong></p>
+                <p>Email: ${newStudent.email}</p>
+                <p>Password: <span style="color: #00f0ff; font-weight: bold; letter-spacing: 2px;">${tempPassword}</span></p>
+            </div>
+            <p>Please log in and change your password immediately from your profile settings.</p>
+            <a href="https://sawnbd.vercel.app/login" style="background: #8B5CF6; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Login to Dashboard</a>
+        </div>
+      `,
     };
 
     await transporter.sendMail(mailOptions);
