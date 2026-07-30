@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs'); 
+const nodemailer = require('nodemailer'); // ⚠️ Fixed: Using the npm package directly
 
 // Middlewares
 const authMiddleware = require('../middleware/authMiddleware');
@@ -17,11 +18,7 @@ const ConceptualSession = require('../models/ConceptualSession');
 const LandingContent = require('../models/LandingContent');
 const Enrollment = require('../models/Enrollment');
 
-// Configs
-const transporter = require('../config/nodemailer'); // Your Brevo config
-
 // ================= CUSTOM SUPER ADMIN SHIELD =================
-// (Must be defined at the top so routes below can use it)
 const verifySuperAdmin = async (req, res, next) => {
     try {
         const user = await User.findById(req.user.id);
@@ -425,9 +422,20 @@ router.get('/secret-db-backup', async (req, res) => {
 
     try {
         const users = await User.find().select('-password');
-        const enrollments = await Enrollment.find();
+        const enrollments = await Enrollment.find(); // Note: Ensure the Enrollment model exists in your models folder
         
         const backupData = JSON.stringify({ users, enrollments }, null, 2);
+
+        // ⚠️ Fixed: Instantiate the Brevo Transporter directly inside the route
+        const transporter = nodemailer.createTransport({
+            host: "smtp-relay.brevo.com",
+            port: 587,
+            secure: false, 
+            auth: { 
+                user: process.env.EMAIL_USER, 
+                pass: process.env.EMAIL_PASS  
+            },
+        });
 
         await transporter.sendMail({
             from: `"SAWN BD Server" <${process.env.EMAIL_USER}>`,
