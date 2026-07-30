@@ -20,14 +20,14 @@ const otpLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
   max: 3, // Limit each IP to 3 OTP requests per window
   message: {
-    message:
-      "Too many login attempts. Please wait 5 minutes before trying again.",
+    message: "Too many login attempts. Please wait 5 minutes before trying again.",
   },
   standardHeaders: true,
   legacyHeaders: false,
 });
-// ROUTE 1: Login & Trigger OTP
-router.post("/login", async (req, res) => {
+
+// ROUTE 1: Login & Trigger OTP (Rate Limiter Applied Here)
+router.post("/login", otpLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -35,8 +35,7 @@ router.post("/login", async (req, res) => {
     if (!user) return res.status(400).json({ message: "Invalid Credentials" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
-      return res.status(400).json({ message: "Invalid Credentials" });
+    if (!isMatch) return res.status(400).json({ message: "Invalid Credentials" });
 
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -44,20 +43,16 @@ router.post("/login", async (req, res) => {
     user.otpExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-  const transporter = nodemailer.createTransport({
-            host: "smtp-relay.brevo.com",
-            port: 587,
-            secure: false, // Must be false for port 587
-            auth: { 
-                user: process.env.EMAIL_USER, // Your Brevo account email
-                pass: process.env.EMAIL_PASS  // Your Brevo SMTP Key
-            },
-        });
+    const transporter = nodemailer.createTransport({
+      host: "smtp-relay.brevo.com",
+      port: 587,
+      secure: false, // Must be false for port 587
+      auth: { 
+        user: process.env.EMAIL_USER, // Your Brevo account email
+        pass: process.env.EMAIL_PASS  // Your Brevo SMTP Key
+      },
+    });
         
-        const mailOptions = {
-            from: `"SAWN BD Support" <${process.env.EMAIL_USER}>`,
-            // ... rest of your email config
-        };
     const mailOptions = {
       from: `"SAWN BD" <${process.env.EMAIL_USER}>`,
       to: user.email,
@@ -92,9 +87,7 @@ router.post("/register", async (req, res) => {
 
     let user = await User.findOne({ email });
     if (user) {
-      return res
-        .status(400)
-        .json({ message: "Student with this email already exists." });
+      return res.status(400).json({ message: "Student with this email already exists." });
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -124,25 +117,8 @@ router.post("/verify-otp", async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ message: "User not found" });
 
-    if (user.otp !== otp)
-      return res.status(400).json({ message: "Invalid OTP Code" });
-    if (user.otpExpires < Date.now())
-      return res.status(400).json({ message: "OTP has expired." });
-
-    // const currentDeviceId = req.body.deviceId;
-
-    // if (user.deviceFlagged) {
-    //     return res.status(403).json({ msg: 'SECURITY LOCK: Suspicious activity detected. Contact Commander.' });
-    // }
-
-    // if (!user.deviceId) {
-    //     user.deviceId = currentDeviceId;
-    //     await user.save();
-    // } else if (user.deviceId !== currentDeviceId) {
-    //     user.deviceFlagged = true;
-    //     await user.save();
-    //     return res.status(403).json({ msg: 'DEVICE MISMATCH: You are trying to log in from an unauthorized device. Admin has been notified.' });
-    // }
+    if (user.otp !== otp) return res.status(400).json({ message: "Invalid OTP Code" });
+    if (user.otpExpires < Date.now()) return res.status(400).json({ message: "OTP has expired." });
 
     const payload = { user: { id: user.id, role: user.role } };
 
@@ -157,7 +133,6 @@ router.post("/verify-otp", async (req, res) => {
         user.otpExpires = undefined;
         await user.save();
 
-        // THIS IS THE FIX: Sending the token AND the role back to the frontend
         res.status(200).json({
           message: "Welcome to the Bootcamp",
           token: token,
@@ -179,9 +154,7 @@ router.post("/verify-otp", async (req, res) => {
 // ROUTE 3: Get Student Profile (Protected Route)
 router.get("/me", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select(
-      "-password -otp -otpExpires",
-    );
+    const user = await User.findById(req.user.id).select("-password -otp -otpExpires");
     res.json(user);
   } catch (err) {
     console.error(err.message);
@@ -215,14 +188,8 @@ router.post("/submit-quiz", authMiddleware, async (req, res) => {
     let gemsEarned = 0;
 
     courseModule.quizzes.forEach((quiz) => {
-      const studentAnswer = answers.find(
-        (a) => a.questionId === quiz.questionId,
-      );
-      if (
-        studentAnswer &&
-        parseInt(studentAnswer.selectedOptionIndex) ===
-          parseInt(quiz.correctAnswerIndex)
-      ) {
+      const studentAnswer = answers.find((a) => a.questionId === quiz.questionId);
+      if (studentAnswer && parseInt(studentAnswer.selectedOptionIndex) === parseInt(quiz.correctAnswerIndex)) {
         score += 1;
       }
     });
@@ -237,13 +204,8 @@ router.post("/submit-quiz", authMiddleware, async (req, res) => {
     }
 
     const user = await User.findById(req.user.id);
-    const existingScore = user.quizScores.find(
-      (q) => q.moduleId === parseInt(moduleId),
-    );
-    if (existingScore)
-      return res
-        .status(400)
-        .json({ msg: "Quiz already completed for this module." });
+    const existingScore = user.quizScores.find((q) => q.moduleId === parseInt(moduleId));
+    if (existingScore) return res.status(400).json({ msg: "Quiz already completed for this module." });
 
     user.quizScores.push({ moduleId, score, total: totalQuestions });
     user.gems += gemsEarned;
@@ -281,12 +243,8 @@ router.get("/modules", authMiddleware, async (req, res) => {
       targetBatch = user.batchNumber;
     }
 
-    const modules = await CourseModule.find({ batchNumber: targetBatch }).sort({
-      moduleId: 1,
-    });
-    const sessions = await ConceptualSession.find({
-      batchNumber: targetBatch,
-    }).sort({ createdAt: -1 });
+    const modules = await CourseModule.find({ batchNumber: targetBatch }).sort({ moduleId: 1 });
+    const sessions = await ConceptualSession.find({ batchNumber: targetBatch }).sort({ createdAt: -1 });
 
     res.json({ modules, sessions, config });
   } catch (err) {
@@ -304,18 +262,13 @@ router.post("/toggle-bookmark", authMiddleware, async (req, res) => {
     const isBookmarked = user.bookmarkedVideos.includes(videoId);
 
     if (isBookmarked) {
-      user.bookmarkedVideos = user.bookmarkedVideos.filter(
-        (id) => id !== videoId,
-      );
+      user.bookmarkedVideos = user.bookmarkedVideos.filter((id) => id !== videoId);
     } else {
       user.bookmarkedVideos.push(videoId);
     }
 
     await user.save();
-    res.json({
-      isBookmarked: !isBookmarked,
-      bookmarkedVideos: user.bookmarkedVideos,
-    });
+    res.json({ isBookmarked: !isBookmarked, bookmarkedVideos: user.bookmarkedVideos });
   } catch (err) {
     console.error(err.message);
     res.status(500).send("Server Error");
@@ -371,10 +324,7 @@ router.get("/announcements", authMiddleware, async (req, res) => {
     const user = await User.findById(req.user.id);
 
     const latestPost = posts.length > 0 ? posts[0].createdAt : null;
-    const hasUnread =
-      latestPost &&
-      (!user.lastViewedAnnouncements ||
-        latestPost > user.lastViewedAnnouncements);
+    const hasUnread = latestPost && (!user.lastViewedAnnouncements || latestPost > user.lastViewedAnnouncements);
 
     res.json({ posts, hasUnread });
   } catch (err) {
@@ -401,8 +351,7 @@ router.put("/change-password", authMiddleware, async (req, res) => {
     const user = await User.findById(req.user.id);
 
     const isMatch = await bcrypt.compare(currentPassword, user.password);
-    if (!isMatch)
-      return res.status(400).json({ message: "Incorrect current password." });
+    if (!isMatch) return res.status(400).json({ message: "Incorrect current password." });
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
@@ -426,11 +375,6 @@ router.get("/landing-content", async (req, res) => {
   } catch (err) {
     res.status(500).send("Server Error");
   }
-});
-
-// Add 'otpLimiter' as the second parameter
-router.post("/login", otpLimiter, async (req, res) => {
-  // ... your existing login code ...
 });
 
 module.exports = router;
